@@ -24,10 +24,12 @@ def load_current(api: FplApi) -> dict:
     hist["kickoff_time"] = pd.to_datetime(hist["kickoff_time"], utc=True)
     for c in STAT_COLS:
         hist[c] = pd.to_numeric(hist[c], errors="coerce")
+    hist["team_score"] = hist["team_h_score"].where(hist["was_home"], hist["team_a_score"])
+    hist["opp_score"] = hist["team_a_score"].where(hist["was_home"], hist["team_h_score"])
     season = _season_label(boot)
     hist["season"] = season
     cols = ["season", "code", "name", "position", "team", "opponent", "was_home", "round",
-            "kickoff_time", "fixture", "value", "total_points", *STAT_COLS]
+            "kickoff_time", "fixture", "team_score", "opp_score", "value", "total_points", *STAT_COLS]
     return {
         "season": season,
         "rows": hist[cols],
@@ -35,7 +37,7 @@ def load_current(api: FplApi) -> dict:
         "teams": teams,
         "events": pd.DataFrame(boot["events"]),
         "fixtures": pd.DataFrame(api.fixtures()),
-        "element_types": pd.DataFrame(boot["element_types"]),
+        "scoring": boot["game_config"]["scoring"],
     }
 
 
