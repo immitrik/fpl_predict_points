@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from .config import POSITIONS
+from .config import POSITIONS, canon_team
 from .fpl_api import FplApi
 from .history import STAT_COLS
 
@@ -11,6 +11,7 @@ def load_current(api: FplApi) -> dict:
     boot = api.bootstrap()
     teams = pd.DataFrame(boot["teams"])
     players = pd.DataFrame(boot["elements"])
+    teams["name"] = teams["name"].map(canon_team)
     team_name = dict(zip(teams["id"], teams["name"]))
 
     summaries = api.all_element_summaries(players["id"].tolist())

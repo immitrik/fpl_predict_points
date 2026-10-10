@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 
+from .odds import load_odds
 from .baseline import events_to_points, expected_events, position_priors
 from .config import PROCESSED_DIR
 from .features import FeatureBuilder
@@ -22,7 +23,7 @@ def upcoming_rows(season: str, horizon: int = HORIZON) -> pd.DataFrame:
     events = sorted(fx["event"].unique())[:horizon]
     fx = fx[fx["event"].isin(events)]
 
-    name = dict(zip(teams["id"], teams["name"]))
+    name = dict(zip(teams["id"], teams["name"]))  # already canonical (see current.py)
     sides = pd.concat([
         pd.DataFrame({"fixture": fx["id"], "round": fx["event"], "kickoff_time": fx["kickoff_time"],
                       "team_id": fx["team_h"], "opponent": fx["team_a"].map(name), "was_home": True}),
@@ -56,11 +57,36 @@ def load_played() -> pd.DataFrame:
     return d[d["team_score"].notna()]  # drop rows from fixtures that haven't finished
 
 
+ODDS_H1_KEEP = 0.7   # share of next-match fixtures whose odds are already published
+
+
+def visible_odds(f: pd.DataFrame, h: int, seed: int = 0) -> pd.DataFrame:
+    """Mimic production: odds exist only a few days ahead, so hide them for h>1 and for some h=1."""
+    f = f.copy()
+    if h == 1:
+        fx = f["season"] + "_" + f["fixture"].astype(str)
+        keep = pd.Series(np.random.default_rng(seed).random(fx.nunique()) < ODDS_H1_KEEP,
+                         index=fx.unique())
+        hide = ~fx.map(keep).to_numpy(bool)
+    else:
+        hide = np.ones(len(f), bool)
+    f.loc[hide, ["odds_gf", "odds_ga"]] = np.nan
+    return f
+
+
+def use_odds(f: pd.DataFrame, weight: float = 0.7) -> pd.DataFrame:
+    """Where odds are known, blend the market's expected goals into the fixture estimate."""
+    f = f.copy()
+    for col, odds in (("exp_gf", "odds_gf"), ("exp_ga", "odds_ga")):
+        f[col] = np.where(f[odds].notna(), weight * f[odds] + (1 - weight) * f[col], f[col])
+    return f
+
+
 def train_frame(fb: FeatureBuilder, before: str | None = None) -> pd.DataFrame:
     """Stacked horizon-h feature frames of played rows (with history) for model training."""
     parts = []
     for h in range(1, MAX_H + 1):
-        f = fb.at(h)
+        f = use_odds(visible_odds(fb.at(h), h))
         m = f["minutes"].notna() & (f["n"] > 0)
         if before is not None:
             m &= f["season"] < before
@@ -86,7 +112,7 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
     season = sorted(played["season"].unique())[-1]
     up = upcoming_rows(season, horizon)
     cols = [c for c in up.columns if c in played.columns]
-    fb = FeatureBuilder(pd.concat([played, up[cols]], ignore_index=True))
+    fb = FeatureBuilder(pd.concat([played, up[cols]], ignore_index=True), load_odds(season))
     priors = position_priors(fb.at(1))
 
     train = train_frame(fb) if ALGOS[algo] else None
@@ -95,7 +121,7 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
              "chance_of_playing_next_round", "selected_by_percent", "news"]
     parts = []
     for h in sorted(up["h"].unique()):
-        f = fb.at(min(h, MAX_H))
+        f = use_odds(fb.at(min(h, MAX_H)))  # real (not masked) odds: only known ones are non-NaN
         f = f.merge(up[up["h"] == h][extra], on=["season", "fixture", "code"])
         f["h"] = min(h, MAX_H)
         ev = expected_events(f, priors, availability(f))
@@ -108,13 +134,17 @@ def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
              horizons: tuple[int, ...] = (1, 3, 5)) -> dict[int, pd.DataFrame]:
     """Train on seasons before `test_season`; compare baseline and ML on every row of it."""
     sc = load_scoring()
-    fb = FeatureBuilder(load_played())
+    played = load_played()
+    fb = FeatureBuilder(played, load_odds(sorted(played["season"].unique())[-1]))
     priors = position_priors(fb.at(1))
     train = train_frame(fb, before=test_season)
     models = {a: EventModels(a).fit(train) for a in algos}
     results = {}
     for h in horizons:
         f = fb.at(h)
+        if h > 1:
+            f = visible_odds(f, h)  # distant fixtures have no published odds yet
+        f = use_odds(f)
         f = f[(f["season"] == test_season) & (f["n"] > 0)]
         ev = expected_events(f, priors)
         base = events_to_points(ev, sc)

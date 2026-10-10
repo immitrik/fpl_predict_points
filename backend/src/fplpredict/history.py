@@ -4,7 +4,7 @@ import io
 import pandas as pd
 import requests
 
-from .config import RAW_DIR, VAASTAV_RAW
+from .config import RAW_DIR, VAASTAV_RAW, canon_team
 
 STAT_COLS = [
     "minutes", "starts", "goals_scored", "assists", "clean_sheets", "goals_conceded",
@@ -38,7 +38,7 @@ def load_season(season: str, refresh: bool = False) -> tuple[pd.DataFrame, pd.Da
     raw = _csv(f"{base}/players_raw.csv", f"{season}/players_raw.csv", refresh)
     teams = _csv(f"{base}/teams.csv", f"{season}/teams.csv", refresh)
 
-    team_name = dict(zip(teams["id"], teams["name"]))
+    team_name = {i: canon_team(n) for i, n in zip(teams["id"], teams["name"])}
     code_of = dict(zip(raw["id"], raw["code"]))
 
     for c in STAT_COLS:
@@ -49,7 +49,7 @@ def load_season(season: str, refresh: bool = False) -> tuple[pd.DataFrame, pd.Da
         "code": gw["element"].map(code_of),
         "name": gw["name"],
         "position": gw["position"].replace(POS_FIX),
-        "team": gw["team"],
+        "team": gw["team"].map(canon_team),
         "opponent": gw["opponent_team"].map(team_name),
         "was_home": gw["was_home"].astype(bool),
         "round": gw["round"],

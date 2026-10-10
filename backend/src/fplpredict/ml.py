@@ -17,12 +17,13 @@ POS_CODE = {"GKP": 0, "DEF": 1, "MID": 2, "FWD": 3}
 COUNT_STATS = ["goals_scored", "assists", "bonus", "yellow_cards"]
 MIN_DC_ROWS = 5000
 
+MARKET_FEATURES = ["odds_gf", "odds_ga", "mk_att", "mk_def", "opp_mk_att", "opp_mk_def", "rest", "opp_rest"]
 PLAYER_FEATURES = (
     [f"{p}_{c}" for p, (_, cols) in EWM_SETS.items() for c in cols]
     + ["n", "n_dc", "h", "was_home", "pos", "value", "exp_gf", "exp_ga",
-       "att_s", "def_s", "opp_att_s", "opp_def_s"]
+       "att_s", "def_s", "opp_att_s", "opp_def_s"] + MARKET_FEATURES
 )
-TEAM_FEATURES = ["exp_gf", "exp_ga", "att_s", "def_s", "opp_att_s", "opp_def_s", "was_home", "h"]
+TEAM_FEATURES = ["exp_gf", "exp_ga", "att_s", "def_s", "opp_att_s", "opp_def_s", "was_home", "h"] + MARKET_FEATURES
 
 
 def design(f: pd.DataFrame, cols: list[str], fill: float | None = None) -> pd.DataFrame:

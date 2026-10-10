@@ -44,7 +44,8 @@ def prepare(frame: pd.DataFrame) -> pd.DataFrame:
 class FeatureBuilder:
     """Computes EWM states once; `at(h)` returns features as known h matches before each row."""
 
-    def __init__(self, frame: pd.DataFrame) -> None:
+    def __init__(self, frame: pd.DataFrame, odds: pd.DataFrame | None = None) -> None:
+        self.odds = odds
         self.base = prepare(frame)
         fc = self.base.sort_values(["code", "kickoff_time", "fixture"])
         self.codes = fc["code"]
@@ -67,9 +68,13 @@ class FeatureBuilder:
         opp_xg = tm[["season", "fixture", "team", "xgf"]].rename(
             columns={"team": "opponent", "xgf": "xga"})
         tm = tm.merge(opp_xg, on=["season", "fixture", "opponent"], how="left")
+        tm = self._attach_odds(tm)
         tm["att_raw"] = 0.5 * tm["gf"] + 0.5 * tm["xgf"]
         tm["def_raw"] = 0.5 * tm["ga"] + 0.5 * tm["xga"]
         tm = tm.sort_values(["team", "kickoff_time", "fixture"]).reset_index(drop=True)
+        # schedule density: days since the team's previous (scheduled) match
+        rest = tm.groupby("team")["kickoff_time"].diff().dt.total_seconds() / 86400
+        tm["rest"] = rest.fillna(7.0).clip(upper=14.0)
 
         played = tm[tm["att_raw"].notna()]
         self.lg = {
@@ -77,18 +82,41 @@ class FeatureBuilder:
             "home": float(played.loc[played["was_home"], "att_raw"].mean()),
             "away": float(played.loc[~played["was_home"], "att_raw"].mean()),
         }
+        self.lg["mk"] = float(tm["odds_gf"].mean()) if tm["odds_gf"].notna().any() else self.lg["all"]
         self.tm = tm
-        self.team_ew = tm.groupby("team")[["att_raw", "def_raw"]].ewm(
+        self.team_ew = tm.groupby("team")[["att_raw", "def_raw", "odds_gf", "odds_ga"]].ewm(
             halflife=TEAM_HALFLIFE).mean().reset_index(level=0, drop=True)
         self.team_n = tm["att_raw"].notna().groupby(tm["team"]).cumsum()
+        self.team_mk_n = tm["odds_gf"].notna().groupby(tm["team"]).cumsum()
+
+    def _attach_odds(self, tm: pd.DataFrame) -> pd.DataFrame:
+        """Market-implied goals for/against of each team-match (NaN where odds are unknown)."""
+        tm = tm.copy()
+        tm["odds_gf"] = np.nan
+        tm["odds_ga"] = np.nan
+        if self.odds is None:
+            return tm
+        home = np.where(tm["was_home"], tm["team"], tm["opponent"])
+        away = np.where(tm["was_home"], tm["opponent"], tm["team"])
+        key = pd.DataFrame({"season": tm["season"], "home": home, "away": away})
+        o = key.merge(self.odds[["season", "home", "away", "lam_h", "lam_a"]], how="left",
+                      on=["season", "home", "away"])
+        tm["odds_gf"] = np.where(tm["was_home"], o["lam_h"], o["lam_a"])
+        tm["odds_ga"] = np.where(tm["was_home"], o["lam_a"], o["lam_h"])
+        return tm
 
     def _team_at(self, h: int) -> pd.DataFrame:
         tm, lg = self.tm, self.lg["all"]
         ew = self.team_ew.groupby(tm["team"]).shift(h)
         n = np.minimum(self.team_n.groupby(tm["team"]).shift(h).fillna(0), TEAM_MAX_N)
-        out = tm[["season", "fixture", "team"]].copy()
+        out = tm[["season", "fixture", "team", "rest", "odds_gf", "odds_ga"]].copy()
         for raw, name in (("att_raw", "att_s"), ("def_raw", "def_s")):
             out[name] = (n * ew[raw].fillna(lg) + TEAM_PRIOR_MATCHES * lg) / (n + TEAM_PRIOR_MATCHES)
+        # market-based ratings: smoothed odds-implied goals for / against
+        mk = self.lg["mk"]
+        nm = np.minimum(self.team_mk_n.groupby(tm["team"]).shift(h).fillna(0), TEAM_MAX_N)
+        for raw, name in (("odds_gf", "mk_att"), ("odds_ga", "mk_def")):
+            out[name] = (nm * ew[raw].fillna(mk) + TEAM_PRIOR_MATCHES * mk) / (nm + TEAM_PRIOR_MATCHES)
         return out
 
     # -- full feature frame -----------------------------------------------------------------
@@ -96,7 +124,9 @@ class FeatureBuilder:
         f = self.base
         tf = self._team_at(h)
         f = f.merge(tf, on=["season", "fixture", "team"], how="left")
-        opp = tf.rename(columns={"team": "opponent", "att_s": "opp_att_s", "def_s": "opp_def_s"})
+        opp = tf.drop(columns=["odds_gf", "odds_ga"]).rename(columns={
+            "team": "opponent", "att_s": "opp_att_s", "def_s": "opp_def_s",
+            "mk_att": "opp_mk_att", "mk_def": "opp_mk_def", "rest": "opp_rest"})
         f = f.merge(opp, on=["season", "fixture", "opponent"], how="left")
         lg = self.lg
         lg_for = np.where(f["was_home"], lg["home"], lg["away"])
