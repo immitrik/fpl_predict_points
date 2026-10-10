@@ -39,7 +39,7 @@ def cmd_fetch(args: argparse.Namespace) -> None:
 def cmd_predict(args: argparse.Namespace) -> None:
     from .pipeline import predict
 
-    pred = predict()
+    pred = predict(algo=args.algo)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     pred.to_parquet(PROCESSED_DIR / "predictions.parquet")
     total = pred.groupby(["code", "name", "team", "position"], as_index=False)["xpts"].sum()
@@ -51,8 +51,9 @@ def cmd_predict(args: argparse.Namespace) -> None:
 def cmd_backtest(args: argparse.Namespace) -> None:
     from .pipeline import backtest, summarize
 
-    res = backtest(args.seasons)
-    print(summarize(res).to_string(float_format="%.3f"))
+    for season in args.seasons:
+        print(f"== test season {season} ({'+'.join(args.algos)}) ==")
+        print(summarize(backtest(season, tuple(args.algos))).to_string(float_format="%.3f"))
 
 
 def main() -> None:
@@ -64,9 +65,11 @@ def main() -> None:
     f.set_defaults(func=cmd_fetch)
     pr = sub.add_parser("predict", help="expected points for the next 5 gameweeks")
     pr.add_argument("--top", type=int, default=20)
+    pr.add_argument("--algo", choices=["lgbm", "rf", "ens", "baseline"], default="ens")
     pr.set_defaults(func=cmd_predict)
     b = sub.add_parser("backtest", help="evaluate the baseline on past rows")
     b.add_argument("--seasons", nargs="+", default=["2025-26"])
+    b.add_argument("--algos", nargs="+", choices=["lgbm", "rf"], default=["lgbm", "rf"])
     b.set_defaults(func=cmd_backtest)
     args = p.parse_args()
     args.func(args)

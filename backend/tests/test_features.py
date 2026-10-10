@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
 
-from fplpredict.features import add_player_features, prepare
+from fplpredict.features import FeatureBuilder
 
 STATS = ["minutes", "goals_scored", "expected_goals", "assists", "expected_assists", "bonus", "saves",
          "yellow_cards", "red_cards", "own_goals", "penalties_saved", "penalties_missed",
-         "defensive_contribution", "total_points"]
+         "defensive_contribution", "total_points", "team_score", "opp_score", "value", "selected"]
 
 
 def _frame(minutes: list[float]) -> pd.DataFrame:
@@ -22,15 +22,24 @@ def _frame(minutes: list[float]) -> pd.DataFrame:
 
 
 def test_features_do_not_see_own_row():
-    a = add_player_features(prepare(_frame([90, 90, 90, 90])))
-    b = add_player_features(prepare(_frame([90, 90, 90, 0])))
+    a = FeatureBuilder(_frame([90, 90, 90, 90])).at(1)
+    b = FeatureBuilder(_frame([90, 90, 90, 0])).at(1)
     assert a["ew_minutes"].iloc[3] == b["ew_minutes"].iloc[3]  # last row's own minutes unseen
     assert a["n"].tolist() == [0, 1, 2, 3]
 
 
 def test_upcoming_rows_carry_last_played_state():
-    f = add_player_features(prepare(_frame([90, 60, np.nan, np.nan])))
+    f = FeatureBuilder(_frame([90, 60, np.nan, np.nan, np.nan])).at(1)
     ew = f["ew_minutes"]
-    assert ew.iloc[2] == ew.iloc[3]
+    assert ew.iloc[2] == ew.iloc[3] == ew.iloc[4]
     assert 60 < ew.iloc[2] < 90
-    assert f["n"].tolist() == [0, 1, 2, 2]
+    assert f["n"].tolist() == [0, 1, 2, 2, 2]
+
+
+def test_horizon_shifts_state_back():
+    fb = FeatureBuilder(_frame([90, 60, 30, 90, 90, 90]))
+    h1, h3 = fb.at(1), fb.at(3)
+    assert h3["ew_minutes"].iloc[4] == h1["ew_minutes"].iloc[2]
+    # an upcoming 3rd match sees the same state as the 1st upcoming one
+    up = FeatureBuilder(_frame([90, 60, 30, np.nan, np.nan, np.nan]))
+    assert up.at(3)["ew_minutes"].iloc[5] == up.at(1)["ew_minutes"].iloc[3]

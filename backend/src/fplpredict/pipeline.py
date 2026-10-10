@@ -2,9 +2,10 @@
 import numpy as np
 import pandas as pd
 
-from .baseline import expected_points, position_priors
+from .baseline import events_to_points, expected_events, position_priors
 from .config import PROCESSED_DIR
-from .features import build_features
+from .features import FeatureBuilder
+from .ml import MAX_H, EventModels
 from .scoring import actual_points, load_scoring
 
 HORIZON = 5
@@ -34,8 +35,11 @@ def upcoming_rows(season: str, horizon: int = HORIZON) -> pd.DataFrame:
     pl["team"] = pl["team_id"].map(name)
     rows = sides.merge(pl, on="team_id")
     rows["season"] = season
+    rows["value"] = rows["now_cost"]
     rows["kickoff_time"] = pd.to_datetime(rows["kickoff_time"], utc=True)
     rows["gw_index"] = rows["round"].map({e: i for i, e in enumerate(events)})
+    rows = rows.sort_values(["kickoff_time", "fixture"])
+    rows["h"] = rows.groupby("code").cumcount() + 1  # which upcoming match this is for the player
     return rows
 
 
@@ -52,44 +56,93 @@ def load_played() -> pd.DataFrame:
     return d[d["team_score"].notna()]  # drop rows from fixtures that haven't finished
 
 
-def predict(horizon: int = HORIZON) -> pd.DataFrame:
+def train_frame(fb: FeatureBuilder, before: str | None = None) -> pd.DataFrame:
+    """Stacked horizon-h feature frames of played rows (with history) for model training."""
+    parts = []
+    for h in range(1, MAX_H + 1):
+        f = fb.at(h)
+        m = f["minutes"].notna() & (f["n"] > 0)
+        if before is not None:
+            m &= f["season"] < before
+        parts.append(f[m])
+    return pd.concat(parts, ignore_index=True)
+
+
+def _blend(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Average the model outputs (event expectations and points)."""
+    out = frames[0].copy()
+    cols = [c for c in out.columns if (c.startswith("x") and c != "xpts_naive")
+            or c in ("p_play", "p60", "m_play", "p_cs_team")]
+    out[cols] = sum(fr[cols] for fr in frames) / len(frames)
+    return out
+
+
+ALGOS = {"lgbm": ["lgbm"], "rf": ["rf"], "ens": ["lgbm", "rf"], "baseline": []}
+
+
+def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
     sc = load_scoring()
     played = load_played()
     season = sorted(played["season"].unique())[-1]
     up = upcoming_rows(season, horizon)
-    frame = pd.concat([played, up[[c for c in up.columns if c in played.columns]]], ignore_index=True)
-    feats, _ = build_features(frame)
-    priors = position_priors(feats)
+    cols = [c for c in up.columns if c in played.columns]
+    fb = FeatureBuilder(pd.concat([played, up[cols]], ignore_index=True))
+    priors = position_priors(fb.at(1))
 
-    is_up = feats["minutes"].isna() & (feats["kickoff_time"] > played["kickoff_time"].max())
-    f_up = feats[is_up].merge(
-        up[["season", "fixture", "code", "element", "gw_index", "status",
-            "chance_of_playing_next_round", "now_cost", "selected_by_percent", "news"]],
-        on=["season", "fixture", "code"])
-    return expected_points(f_up, sc, priors, availability(f_up))
+    train = train_frame(fb) if ALGOS[algo] else None
+    models = [EventModels(a).fit(train) for a in ALGOS[algo]]
+    extra = ["season", "fixture", "code", "element", "gw_index", "status",
+             "chance_of_playing_next_round", "selected_by_percent", "news"]
+    parts = []
+    for h in sorted(up["h"].unique()):
+        f = fb.at(min(h, MAX_H))
+        f = f.merge(up[up["h"] == h][extra], on=["season", "fixture", "code"])
+        f["h"] = min(h, MAX_H)
+        ev = expected_events(f, priors, availability(f))
+        outs = [events_to_points(m.apply(ev), sc) for m in models] or [events_to_points(ev, sc)]
+        parts.append(_blend(outs))
+    return pd.concat(parts, ignore_index=True)
 
 
-def backtest(seasons: list[str]) -> pd.DataFrame:
+def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
+             horizons: tuple[int, ...] = (1, 3, 5)) -> dict[int, pd.DataFrame]:
+    """Train on seasons before `test_season`; compare baseline and ML on every row of it."""
     sc = load_scoring()
-    feats, _ = build_features(load_played())
-    priors = position_priors(feats)
-    f = feats[feats["season"].isin(seasons) & feats["n"].gt(0)]
-    res = expected_points(f, sc, priors)
-    res["actual"] = actual_points(res, sc)
-    return res
+    fb = FeatureBuilder(load_played())
+    priors = position_priors(fb.at(1))
+    train = train_frame(fb, before=test_season)
+    models = {a: EventModels(a).fit(train) for a in algos}
+    results = {}
+    for h in horizons:
+        f = fb.at(h)
+        f = f[(f["season"] == test_season) & (f["n"] > 0)]
+        ev = expected_events(f, priors)
+        base = events_to_points(ev, sc)
+        res = base[["season", "round", "code", "name", "position", "ew_minutes"]].copy()
+        res["actual"] = actual_points(f, sc)
+        res["naive"], res["baseline"] = base["xpts_naive"], base["xpts"]
+        outs = {a: events_to_points(m.apply(ev), sc) for a, m in models.items()}
+        for a, o in outs.items():
+            res[a] = o["xpts"]
+        if len(outs) > 1:
+            res["ens"] = _blend(list(outs.values()))["xpts"]
+        res["fpl_xp"] = f["fpl_xp"]
+        results[h] = res
+    return results
 
 
-def summarize(res: pd.DataFrame) -> pd.DataFrame:
-    def stats(g: pd.DataFrame) -> pd.Series:
-        return pd.Series({
-            "rows": len(g),
-            "mae_model": (g["xpts"] - g["actual"]).abs().mean(),
-            "mae_naive": (g["xpts_naive"] - g["actual"]).abs().mean(),
-            "rmse_model": np.sqrt(((g["xpts"] - g["actual"]) ** 2).mean()),
-            "rmse_naive": np.sqrt(((g["xpts_naive"] - g["actual"]) ** 2).mean()),
-            "corr_model": g["xpts"].corr(g["actual"]),
-            "corr_naive": g["xpts_naive"].corr(g["actual"]),
-            "bias_model": (g["xpts"] - g["actual"]).mean(),
-        })
-    regulars = res[res["xmin"] >= 45]
-    return pd.concat({"all": stats(res), "xmin>=45": stats(regulars)}, axis=1).T
+def summarize(results: dict[int, pd.DataFrame]) -> pd.DataFrame:
+    rows = {}
+    for h, res in results.items():
+        models = [c for c in res.columns if c not in
+                  ("season", "round", "code", "name", "position", "ew_minutes", "actual", "fpl_xp")]
+        if h == 1 and res["fpl_xp"].notna().any():
+            res = res[res["fpl_xp"].notna()]  # same rows for every model incl. FPL's own xP
+            models.append("fpl_xp")
+        for label, g in (("all", res), ("regulars", res[res["ew_minutes"] >= 45])):
+            row = {"rows": len(g)}
+            for m in models:
+                err = g[m] - g["actual"]
+                row[f"mae_{m}"], row[f"corr_{m}"] = err.abs().mean(), g[m].corr(g["actual"])
+            rows[(f"h={h}", label)] = row
+    return pd.DataFrame(rows).T

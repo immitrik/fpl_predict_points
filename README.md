@@ -17,7 +17,7 @@ cd backend
 python -m venv .venv
 .venv/Scripts/python -m pip install -e ".[dev]"
 .venv/Scripts/python -m fplpredict.cli fetch     # writes data/processed/*.parquet
-.venv/Scripts/python -m fplpredict.cli predict   # 5-GW expected points -> data/processed/predictions.parquet
-.venv/Scripts/python -m fplpredict.cli backtest --seasons 2024-25 2025-26
+.venv/Scripts/python -m fplpredict.cli predict   # 5-GW expected points (LightGBM+RF ensemble) -> data/processed/predictions.parquet
+.venv/Scripts/python -m fplpredict.cli backtest --seasons 2025-26 2026-27   # baseline vs LightGBM vs RF vs ensemble
 .venv/Scripts/python -m pytest
 ```

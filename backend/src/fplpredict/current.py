@@ -1,4 +1,5 @@
 """Current-season data from the live FPL API, normalised to the same schema as history.py."""
+import numpy as np
 import pandas as pd
 
 from .config import POSITIONS
@@ -26,10 +27,11 @@ def load_current(api: FplApi) -> dict:
         hist[c] = pd.to_numeric(hist[c], errors="coerce")
     hist["team_score"] = hist["team_h_score"].where(hist["was_home"], hist["team_a_score"])
     hist["opp_score"] = hist["team_a_score"].where(hist["was_home"], hist["team_h_score"])
+    hist["fpl_xp"] = np.nan  # the official expected points are only archived for past seasons
     season = _season_label(boot)
     hist["season"] = season
     cols = ["season", "code", "name", "position", "team", "opponent", "was_home", "round",
-            "kickoff_time", "fixture", "team_score", "opp_score", "value", "total_points", *STAT_COLS]
+            "kickoff_time", "fixture", "team_score", "opp_score", "value", "selected", "fpl_xp", "total_points", *STAT_COLS]
     return {
         "season": season,
         "rows": hist[cols],

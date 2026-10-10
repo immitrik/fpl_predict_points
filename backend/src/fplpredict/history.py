@@ -58,6 +58,8 @@ def load_season(season: str, refresh: bool = False) -> tuple[pd.DataFrame, pd.Da
         "team_score": gw["team_h_score"].where(gw["was_home"].astype(bool), gw["team_a_score"]),
         "opp_score": gw["team_a_score"].where(gw["was_home"].astype(bool), gw["team_h_score"]),
         "value": gw["value"],
+        "selected": pd.to_numeric(gw["selected"], errors="coerce"),
+        "fpl_xp": pd.to_numeric(gw["xP"], errors="coerce"),
         "total_points": gw["total_points"],
         **{c: pd.to_numeric(gw[c], errors="coerce") for c in STAT_COLS},
     })

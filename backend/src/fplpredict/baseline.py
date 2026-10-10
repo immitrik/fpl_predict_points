@@ -42,9 +42,9 @@ def _blend(f: pd.DataFrame, stat: str) -> pd.Series:
     return f[f"ew_{stat}"]
 
 
-def expected_points(f: pd.DataFrame, sc: dict, priors: pd.DataFrame,
+def expected_events(f: pd.DataFrame, priors: pd.DataFrame,
                     avail: pd.Series | None = None) -> pd.DataFrame:
-    """Add expected event counts and `xpts` to a feature frame (see features.build_features)."""
+    """Expected event counts from shrunk EWM rates (see features.FeatureBuilder)."""
     out = f.copy()
     pos = out["position"]
     avail = np.ones(len(out)) if avail is None else avail.to_numpy()
@@ -54,9 +54,10 @@ def expected_points(f: pd.DataFrame, sc: dict, priors: pd.DataFrame,
     m_ew = out["ew_minutes"].fillna(NEW_PLAYER["minutes"]).where(~fresh, NEW_PLAYER["minutes"])
     p_play = out["ew_played"].fillna(NEW_PLAYER["played"]).where(~fresh, NEW_PLAYER["played"])
     p60 = out["ew_p60"].fillna(NEW_PLAYER["p60"]).where(~fresh, NEW_PLAYER["p60"])
+    out["avail"], out["p_play"], out["p60"] = avail, p_play, p60
+    out["m_play"] = (m_ew / p_play.clip(lower=0.05)).clip(1, 90)
     out["xmin"] = m_ew * avail
     scale = out["xmin"] / 90
-    m_play = (m_ew / p_play.clip(lower=0.05)).clip(1, 90)
 
     f_att = (out["exp_gf"] / out["att_s"]).clip(0.5, 2)
     f_def = (out["exp_ga"] / out["def_s"]).clip(0.5, 2)
@@ -69,22 +70,29 @@ def expected_points(f: pd.DataFrame, sc: dict, priors: pd.DataFrame,
         out[f"x_{stat}"] = rate90 * scale * factor.get(stat, 1.0)
     out.loc[pos != "GKP", "x_saves"] = 0.0
 
-    # clean sheet: team keeps a clean sheet (Poisson) and the player is on the pitch for 60+
-    out["x_cs"] = np.exp(-out["exp_ga"]) * p60 * avail
-    gc_mu = out["exp_ga"] * m_play / 90
-    out["x_gc_pts_units"] = p_play * avail * expected_floor(gc_mu.to_numpy(), GC_PER_POINT)
-    sv_mu = (out["x_saves"] / (p_play * avail).clip(lower=0.05)).to_numpy()
-    out["x_save_units"] = p_play * avail * expected_floor(sv_mu, SAVES_PER_POINT)
-
+    out["p_cs_team"] = np.exp(-out["exp_ga"])  # Poisson: P(no goals conceded)
     n_dc = np.minimum(out["n_dc"], MAX_N)
     p_dc = (n_dc * out["ew_dc_ind"].fillna(0.0) + PRIOR_MATCHES * pos.map(priors["dc"])) / (n_dc + PRIOR_MATCHES)
     out["x_dc"] = p_dc * avail
+    return out
+
+
+def events_to_points(out: pd.DataFrame, sc: dict) -> pd.DataFrame:
+    """Convert expected events to expected points with the official scoring rules."""
+    out = out.copy()
+    pos, avail, p_play = out["position"], out["avail"], out["p_play"]
+    out["x_cs"] = out["p_cs_team"] * out["p60"] * avail
+    # goals conceded while on the pitch: Poisson with rate implied by P(clean sheet)
+    gc_mu = -np.log(out["p_cs_team"].clip(1e-6, 1)) * out["m_play"] / 90
+    out["x_gc_pts_units"] = p_play * avail * expected_floor(gc_mu.to_numpy(), GC_PER_POINT)
+    sv_mu = (out["x_saves"] / (p_play * avail).clip(lower=0.05)).to_numpy()
+    out["x_save_units"] = p_play * avail * expected_floor(sv_mu, SAVES_PER_POINT)
 
     def by_pos(key: str) -> pd.Series:
         return pos.map(sc[key]).astype(float)
 
     out["xpts"] = (
-        avail * (p_play * sc["short_play"] + p60 * (sc["long_play"] - sc["short_play"]))
+        avail * (p_play * sc["short_play"] + out["p60"] * (sc["long_play"] - sc["short_play"]))
         + out["x_goals"] * by_pos("goals_scored")
         + out["x_assists"] * sc["assists"]
         + out["x_cs"] * by_pos("clean_sheets")
@@ -100,3 +108,8 @@ def expected_points(f: pd.DataFrame, sc: dict, priors: pd.DataFrame,
     )
     out["xpts_naive"] = out["ew_total_points"].fillna(0.0) * avail
     return out
+
+
+def expected_points(f: pd.DataFrame, sc: dict, priors: pd.DataFrame,
+                    avail: pd.Series | None = None) -> pd.DataFrame:
+    return events_to_points(expected_events(f, priors, avail), sc)
