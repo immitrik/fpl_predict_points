@@ -124,3 +124,7 @@ table.ticker td.cells { text-align: left; padding: 4px; }
 }
 
 table.ticker th:not(.left) { text-align: center; }
+
+.tag { margin-left: 6px; font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.roles { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
+.role { font-size: 0.8rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }

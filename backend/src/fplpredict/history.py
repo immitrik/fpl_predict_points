@@ -66,3 +66,28 @@ def load_season(season: str, refresh: bool = False) -> tuple[pd.DataFrame, pd.Da
     # the archive occasionally lists a player twice for the same fixture
     out = out.drop_duplicates(["code", "fixture"]).reset_index(drop=True)
     return out, teams
+
+
+ROLE_STRENGTH = {1: 1.0, 2: 0.5, 3: 0.25}
+
+
+def role_strength(order: pd.Series) -> pd.Series:
+    """Set-piece rota position (1 = first choice) -> 1.0 / 0.5 / 0.25 / 0.1 (4th+), 0 if none."""
+    return order.map(ROLE_STRENGTH).fillna(order.notna().astype(float) * 0.1)
+
+
+def set_pieces(raw: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Penalty / corner / direct free-kick roles per player from a players table (FPL schema)."""
+    return pd.DataFrame({
+        "season": season,
+        "code": raw["code"],
+        "pen": role_strength(raw["penalties_order"]),
+        "corner": role_strength(raw["corners_and_indirect_freekicks_order"]),
+        "fk": role_strength(raw["direct_freekicks_order"]),
+    })
+
+
+def load_set_pieces(season: str, refresh: bool = False) -> pd.DataFrame:
+    """End-of-season roles of a finished season (archive snapshot)."""
+    raw = _csv(f"{VAASTAV_RAW}/{season}/players_raw.csv", f"{season}/players_raw.csv", refresh)
+    return set_pieces(raw, season)

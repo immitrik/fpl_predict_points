@@ -6,6 +6,7 @@ export interface Fixture {
   h: boolean; // home
   xp: number; // expected points
   mn: number; // expected minutes
+  av: number; // chance of being available (injury / suspension news)
   g: number; // expected goals
   a: number; // expected assists
   cs: number; // clean sheet probability (for the player)
@@ -32,6 +33,8 @@ export interface Player {
   status: string;
   chance: number | null;
   news: string;
+  back: string | null; // parsed expected return date (ISO) if the news gives one
+  roles: { pen: number; cor: number; fk: number }; // set-piece rota strength: 1 first choice
   pts: number;
   mins: number;
   gw: number[];

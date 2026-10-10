@@ -52,6 +52,12 @@ export default function PlayerModal({ player: p, gws, onClose }: Props) {
   }, [onClose]);
 
   const showSaves = p.pos === "GKP";
+  const showAvail = p.fx.some((x) => x.av < 0.995);
+  const roles = [
+    ["Penalties", p.roles.pen],
+    ["Corners", p.roles.cor],
+    ["Free kicks", p.roles.fk],
+  ].filter(([, v]) => (v as number) > 0) as [string, number][];
   const showDef = p.pos !== "FWD";
 
   return (
@@ -65,7 +71,20 @@ export default function PlayerModal({ player: p, gws, onClose }: Props) {
         <p className="sub">
           £{p.cost.toFixed(1)}m · {p.own.toFixed(1)}% owned · {p.pts} pts in {p.mins} min this season
         </p>
-        {p.news && <p className={p.chance !== null && p.chance <= 25 ? "news red" : "news amber"}>{p.news}</p>}
+        {p.news && (
+          <p className={p.chance !== null && p.chance <= 25 ? "news red" : "news amber"}>
+            {p.news}
+          </p>
+        )}
+        {roles.length > 0 && (
+          <p className="roles">
+            {roles.map(([label, v]) => (
+              <span key={label} className="role">
+                {label}: {v >= 1 ? "1st" : v >= 0.5 ? "2nd" : "backup"}
+              </span>
+            ))}
+          </p>
+        )}
 
         <div className="summary">
           {gws.map((g, i) => (
@@ -90,6 +109,7 @@ export default function PlayerModal({ player: p, gws, onClose }: Props) {
               <tr>
                 <th className="left">GW</th>
                 <th className="left">Opponent</th>
+                {showAvail && <th>Avail %</th>}
                 <th>Min</th>
                 <th>Goals</th>
                 <th>Assists</th>
@@ -105,6 +125,7 @@ export default function PlayerModal({ player: p, gws, onClose }: Props) {
                 <tr key={i}>
                   <td className="left">{x.r}</td>
                   <td className="left">{x.o} ({x.h ? "H" : "A"})</td>
+                  {showAvail && <td>{(x.av * 100).toFixed(0)}</td>}
                   <td>{x.mn.toFixed(0)}</td>
                   <td>{x.g.toFixed(2)}</td>
                   <td>{x.a.toFixed(2)}</td>
@@ -123,7 +144,8 @@ export default function PlayerModal({ player: p, gws, onClose }: Props) {
         </div>
         <p className="muted small">
           Expected values per match. Goals, assists and bonus are expected counts; CS and DC are
-          probabilities; all are scaled by the chance of playing.
+          probabilities; all are scaled by the chance of playing. Availability comes from the injury
+          news (return dates are parsed; unknown return dates use a conservative prior).
         </p>
       </div>
     </div>

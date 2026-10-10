@@ -1,11 +1,12 @@
 """Write the static JSON files consumed by the web app."""
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from .config import PROCESSED_DIR
+from .news import parse
 
 FORM_MATCHES = 8
 
@@ -38,6 +39,9 @@ def build(pred: pd.DataFrame, played: pd.DataFrame, model: str) -> tuple[dict, d
         by_gw = g.groupby("round")["xpts"].sum()
         stats = season_stats.loc[first["code"]] if first["code"] in season_stats.index else None
         chance = first["chance_of_playing_next_round"]
+        added = pd.to_datetime(first["news_added"], errors="coerce", utc=True)
+        parsed = parse(first["news"] or None, added.date() if pd.notna(added) else date.today())
+        back = parsed.back.isoformat() if parsed.back else None
         players.append({
             "id": int(element),
             "name": first["name"],
@@ -48,13 +52,15 @@ def build(pred: pd.DataFrame, played: pd.DataFrame, model: str) -> tuple[dict, d
             "status": first["status"],
             "chance": None if pd.isna(chance) else int(chance),
             "news": first["news"] or "",
+            "back": back,
+            "roles": {"pen": _r(first["pen"]), "cor": _r(first["corner"]), "fk": _r(first["fk"])},
             "pts": 0 if stats is None else int(stats["pts"]),
             "mins": 0 if stats is None else int(stats["mins"]),
             "gw": [_r(by_gw.get(r, 0.0)) for r in gws],
             "total": _r(g["xpts"].sum()),
             "fx": [
                 {"r": int(x.round), "o": short.get(x.opponent, x.opponent), "h": bool(x.was_home),
-                 "xp": _r(x.xpts), "mn": _r(x.xmin, 1), "g": _r(x.x_goals, 3), "a": _r(x.x_assists, 3),
+                 "xp": _r(x.xpts), "mn": _r(x.xmin, 1), "av": _r(x.avail), "g": _r(x.x_goals, 3), "a": _r(x.x_assists, 3),
                  "cs": _r(x.x_cs, 3), "b": _r(x.x_bonus, 3), "dc": _r(x.x_dc, 3), "sv": _r(x.x_saves, 2)}
                 for x in g.itertuples()
             ],

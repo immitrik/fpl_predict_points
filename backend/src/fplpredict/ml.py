@@ -20,7 +20,7 @@ MIN_DC_ROWS = 5000
 MARKET_FEATURES = ["odds_gf", "odds_ga", "mk_att", "mk_def", "opp_mk_att", "opp_mk_def", "rest", "opp_rest"]
 PLAYER_FEATURES = (
     [f"{p}_{c}" for p, (_, cols) in EWM_SETS.items() for c in cols]
-    + ["n", "n_dc", "h", "was_home", "pos", "value", "sel_rank", "exp_gf", "exp_ga",
+    + ["n", "n_dc", "h", "was_home", "pos", "value", "sel_rank", "pen", "corner", "fk", "exp_gf", "exp_ga",
        "att_s", "def_s", "opp_att_s", "opp_def_s"] + MARKET_FEATURES
 )
 TEAM_FEATURES = ["exp_gf", "exp_ga", "att_s", "def_s", "opp_att_s", "opp_def_s", "was_home", "h"] + MARKET_FEATURES

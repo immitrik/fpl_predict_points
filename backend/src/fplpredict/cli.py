@@ -7,14 +7,15 @@ import pandas as pd
 from .config import HISTORY_SEASONS, PROCESSED_DIR
 from .current import load_current
 from .fpl_api import FplApi
-from .history import load_season
+from .history import load_season, load_set_pieces, set_pieces
 from .pipeline import ALGOS
 
 MODEL_LABELS = {"ens": "LightGBM + Random Forest", "lgbm": "LightGBM", "rf": "Random Forest",
                 "ens-pos": "LightGBM + Random Forest (per-position)", "baseline": "Baseline"}
 
 PLAYER_COLS = ["id", "code", "web_name", "team", "element_type", "now_cost", "status",
-               "chance_of_playing_next_round", "news", "selected_by_percent", "removed"]
+               "chance_of_playing_next_round", "news", "news_added", "selected_by_percent", "removed",
+               "penalties_order", "corners_and_indirect_freekicks_order", "direct_freekicks_order"]
 FIXTURE_COLS = ["id", "event", "team_h", "team_a", "kickoff_time", "started", "finished"]
 
 
@@ -26,12 +27,21 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         print(f"{season}: {len(rows)} rows")
         frames.append(rows)
 
+    roles = [load_set_pieces(season, refresh=args.refresh) for season in HISTORY_SEASONS]
+
     cur = load_current(FplApi())
+    cur_roles = set_pieces(cur["players"], cur["season"])
+    # match logs: anyone who missed a penalty this season is evidently a taker
+    missed = cur["rows"].groupby("code")["penalties_missed"].sum()
+    took = cur_roles["code"].map(missed).fillna(0) > 0
+    cur_roles.loc[took, "pen"] = cur_roles.loc[took, "pen"].clip(lower=0.5)
+    roles.append(cur_roles)
+    pd.concat(roles, ignore_index=True).to_parquet(PROCESSED_DIR / "set_pieces.parquet")
     print(f"{cur['season']} (live): {len(cur['rows'])} rows")
     frames.append(cur["rows"])
 
     pd.concat(frames, ignore_index=True).to_parquet(PROCESSED_DIR / "player_gw.parquet")
-    cur["players"][PLAYER_COLS].to_parquet(PROCESSED_DIR / "current_players.parquet")
+    cur["players"][PLAYER_COLS].astype({"news_added": "string"}).to_parquet(PROCESSED_DIR / "current_players.parquet")
     cur["teams"][["id", "name", "short_name"]].to_parquet(PROCESSED_DIR / "current_teams.parquet")
     cur["events"][["id", "finished", "is_current", "is_next"]].to_parquet(
         PROCESSED_DIR / "current_events.parquet")

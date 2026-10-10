@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 
+from .news import row_availability
 from .odds import load_odds
 from .baseline import events_to_points, expected_events, position_priors
 from .config import PROCESSED_DIR
@@ -36,6 +37,7 @@ def upcoming_rows(season: str, horizon: int = HORIZON) -> pd.DataFrame:
     pl["team"] = pl["team_id"].map(name)
     rows = sides.merge(pl, on="team_id")
     rows["season"] = season
+    rows = attach_roles(rows)
     rows["value"] = rows["now_cost"]
     rows["selected"] = rows["selected_by_percent"].astype(float)  # current ownership (cold-start signal)
     rows["kickoff_time"] = pd.to_datetime(rows["kickoff_time"], utc=True)
@@ -45,17 +47,17 @@ def upcoming_rows(season: str, horizon: int = HORIZON) -> pd.DataFrame:
     return rows
 
 
-def availability(rows: pd.DataFrame) -> pd.Series:
-    """Heuristic from the API's fitness flag: GW1 uses it directly, later GWs regress to 1."""
-    chance = rows["chance_of_playing_next_round"].astype(float).div(100).fillna(1.0)
-    later = (chance + 1) / 2
-    av = chance.where(rows["gw_index"] == 0, later)
-    return av.where(rows["status"] != "u", 0.0)
+def attach_roles(d: pd.DataFrame) -> pd.DataFrame:
+    """Add set-piece role strengths (pen / corner / fk) by (season, code); 0 when no role."""
+    roles = _read("set_pieces").drop_duplicates(["season", "code"])
+    d = d.merge(roles, on=["season", "code"], how="left")
+    d[["pen", "corner", "fk"]] = d[["pen", "corner", "fk"]].fillna(0.0)
+    return d
 
 
 def load_played() -> pd.DataFrame:
     d = _read("player_gw")
-    return d[d["team_score"].notna()]  # drop rows from fixtures that haven't finished
+    return attach_roles(d[d["team_score"].notna()])  # drop rows of fixtures that haven't finished
 
 
 ODDS_H1_KEEP = 0.7   # share of next-match fixtures whose odds are already published
@@ -130,13 +132,14 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
     train = train_frame(fb) if ALGOS[algo] else None
     models = [make_models(a).fit(train) for a in ALGOS[algo]]
     extra = ["season", "fixture", "code", "element", "gw_index", "status", "now_cost",
-             "chance_of_playing_next_round", "selected_by_percent", "news"]
+             "chance_of_playing_next_round", "selected_by_percent", "news", "news_added"]
     parts = []
     for h in sorted(up["h"].unique()):
         f = use_odds(fb.at(min(h, MAX_H)))  # real (not masked) odds: only known ones are non-NaN
         f = f.merge(up[up["h"] == h][extra], on=["season", "fixture", "code"])
+        avail = row_availability(f.assign(h=h))  # h = how many matches ahead (uncapped)
         f["h"] = min(h, MAX_H)
-        ev = expected_events(f, priors, availability(f))
+        ev = expected_events(f, priors, avail)
         outs = [events_to_points(m.apply(ev), sc) for m in models] or [events_to_points(ev, sc)]
         parts.append(_blend(outs))
     return pd.concat(parts, ignore_index=True)

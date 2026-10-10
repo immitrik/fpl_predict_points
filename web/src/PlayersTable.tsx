@@ -36,7 +36,7 @@ export default function PlayersTable({ players, gws, onSelect }: Props) {
     };
     return players
       .filter((p) => (pos === "ALL" || p.pos === pos) && (team === "ALL" || p.team === team))
-      .filter((p) => p.cost <= maxCost && (!hideOut || p.chance !== 0))
+      .filter((p) => p.cost <= maxCost && (!hideOut || p.fx.some((x) => x.av > 0)))
       .filter((p) => !q || p.name.toLowerCase().includes(q))
       .sort((a, b) => (desc ? val(b) - val(a) : val(a) - val(b)));
   }, [players, pos, team, query, maxCost, hideOut, sort, desc]);
@@ -147,6 +147,7 @@ export default function PlayersTable({ players, gws, onSelect }: Props) {
                   <span className={`pos ${p.pos}`}>{p.pos}</span>
                   <span className="name">{p.name}</span>
                   <span className="team">{p.team}</span>
+                  {p.roles.pen >= 1 && <span className="tag" title="First-choice penalty taker">P</span>}
                   {p.chance !== null && p.chance < 100 && (
                     <span className={p.chance <= 25 ? "flag red" : "flag amber"} title={p.news}>
                       {p.chance}%
