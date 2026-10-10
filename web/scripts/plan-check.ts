@@ -6,6 +6,7 @@ import { loadTeam, sellingPrices } from "../src/fplApi.ts";
 import { planTransfers, type Candidate } from "../src/optimizer.ts";
 
 const id = Number(process.argv[2] ?? 1);
+const win = (process.argv[4] ?? "0-3").split("-").map(Number); // gameweek indices from the next deadline
 const free = Number(process.argv[3] ?? 1);
 const data = JSON.parse(readFileSync("public/data/players.json", "utf8"));
 const byId = new Map<number, any>(data.players.map((p: any) => [p.id, p]));
@@ -14,10 +15,10 @@ const team = await loadTeam(id);
 const tenth = (x: number) => Math.round(x * 10);
 const sell = sellingPrices(team.squad, team.transfers, (e) => tenth(byId.get(e).cost), (e) => tenth(byId.get(e).start));
 const sumSell = [...sell.values()].reduce((a, b) => a + b, 0);
-console.log(team.title, "GW", team.event, "| bank", team.bank / 10, "| API value", team.teamValue / 10, "| my sell sum", sumSell / 10);
+console.log(team.title, "GW", team.event, "| free transfers", team.freeTransfers, "| bank", team.bank / 10, "| API value", team.teamValue / 10, "| my sell sum", sumSell / 10);
 
 const cands: Candidate[] = data.players.map((p: any) => ({
-  id: p.id, name: p.name, pos: p.pos, team: p.team, buy: tenth(p.cost), gw: p.gw,
+  id: p.id, name: p.name, pos: p.pos, team: p.team, buy: tenth(p.cost), gw: p.gw.slice(1 + win[0], 1 + win[1] + 1), // skip GW6 (already under way)
 }));
 const highs = await highsLoader();
 const t0 = Date.now();
@@ -25,6 +26,6 @@ const res = await planTransfers(highs as any, cands, team.squad, sell, team.bank
 console.log("solved in", Date.now() - t0, "ms");
 const nm = (i: number) => byId.get(i).name;
 for (const s of res) {
-  console.log(`k=${s.k} ep=${s.ep.toFixed(1)} hit=${s.hit} net=${s.net.toFixed(1)} bank=${s.bank / 10}`,
+  console.log(`k=${s.k} perGw=[${s.perGw.map((x) => x.toFixed(1)).join(",")}] sum=${s.perGw.reduce((a, b) => a + b, 0).toFixed(1)} ep=${s.ep.toFixed(1)} hit=${s.hit} net=${s.net.toFixed(1)} bank=${s.bank / 10}`,
     s.out.map(nm).join(",") + " -> " + s.in.map(nm).join(","));
 }

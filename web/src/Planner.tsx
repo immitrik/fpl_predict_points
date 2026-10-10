@@ -35,6 +35,8 @@ export default function Planner({ players, gws, nextEvent }: Props) {
   const params = new URLSearchParams(window.location.search);
   const [teamId, setTeamId] = useState(params.get("t") ?? "");
   const [free, setFree] = useState(1);
+  const [autoFree, setAutoFree] = useState(false); // free transfers were read from the team's history
+  const [win, setWin] = useState<[number, number]>([0, Math.max(0, hz.length - 1)]); // gameweeks to optimise for
   const [squad, setSquad] = useState<Squad | null>(null);
   const [manual, setManual] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,9 +46,22 @@ export default function Planner({ players, gws, nextEvent }: Props) {
 
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const candidates: Candidate[] = useMemo(
-    () => players.map((p) => ({ id: p.id, name: p.name, pos: p.pos, team: p.team, buy: tenth(p.cost), gw: p.gw.slice(from) })),
-    [players, from],
+    () =>
+      players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        pos: p.pos,
+        team: p.team,
+        buy: tenth(p.cost),
+        gw: p.gw.slice(from + win[0], from + win[1] + 1),
+      })),
+    [players, from, win],
   );
+  const wgws = hz.slice(win[0], win[1] + 1); // gameweek numbers in the chosen window
+  const changeWin = (w: [number, number]) => {
+    setWin(w);
+    setResults(null);
+  };
 
   const applyTeam = (t: LoadedTeam) => {
     const missing = t.squad.filter((e) => !byId.has(e));
@@ -60,6 +75,12 @@ export default function Planner({ players, gws, nextEvent }: Props) {
     setSquad({ title: t.title, ids: t.squad, bank: t.bank, sell });
     setManual(false);
     setResults(null);
+    if (t.freeTransfers !== null) {
+      setFree(t.freeTransfers);
+      setAutoFree(true);
+    } else {
+      setAutoFree(false);
+    }
   };
 
   const fromPaste = (picks: string, transfers: string) => {
@@ -131,8 +152,8 @@ export default function Planner({ players, gws, nextEvent }: Props) {
     <section className="planner">
       <h2>Transfer planner</h2>
       <p className="muted">
-        Enter your FPL team ID and get the best squad for GW{hz[0]}–{hz[hz.length - 1]} with 1–4 transfers,
-        counting a −4 point hit for every transfer beyond your free ones.
+        Enter your FPL team ID and get the best squad with 1–4 transfers for the gameweeks you pick (one week
+        or several), counting a −4 point hit for every transfer beyond your free ones.
       </p>
 
       <div className="filters">
@@ -148,11 +169,19 @@ export default function Planner({ players, gws, nextEvent }: Props) {
         </label>
         <label className="field">
           Free transfers
-          <select value={free} onChange={(e) => setFree(Number(e.target.value))}>
+          <select
+            value={free}
+            onChange={(e) => {
+              setFree(Number(e.target.value));
+              setAutoFree(false);
+              setResults(null);
+            }}
+          >
             {[0, 1, 2, 3, 4, 5].map((n) => (
               <option key={n}>{n}</option>
             ))}
           </select>
+          {autoFree && <small className="auto">auto-detected</small>}
         </label>
         <button className="primary" onClick={() => void fromApi()} disabled={!!busy}>
           Load team
@@ -181,7 +210,40 @@ export default function Planner({ players, gws, nextEvent }: Props) {
           <h3>
             {squad.title} · bank {money(squad.bank)}
           </h3>
-          <SquadTable ids={squad.ids} byId={byId} sell={squad.sell} from={from} />
+          <SquadTable ids={squad.ids} byId={byId} sell={squad.sell} from={from + win[0]} to={from + win[1] + 1} labels={wgws} />
+          <div className="filters winpick">
+            <span className="muted">Optimise for</span>
+            <label className="field">
+              From
+              <select value={win[0]} onChange={(e) => changeWin([Number(e.target.value), Math.max(win[1], Number(e.target.value))])}>
+                {hz.map((g, i) => (
+                  <option key={g} value={i}>
+                    GW{g}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              To
+              <select value={win[1]} onChange={(e) => changeWin([Math.min(win[0], Number(e.target.value)), Number(e.target.value)])}>
+                {hz.map((g, i) => (
+                  <option key={g} value={i} disabled={i < win[0]}>
+                    GW{g}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="chips">
+              {hz.map((g, i) => (
+                <button key={g} className={win[0] === i && win[1] === i ? "chip active" : "chip"} onClick={() => changeWin([i, i])}>
+                  GW{g} only
+                </button>
+              ))}
+              <button className={win[0] === 0 && win[1] === hz.length - 1 ? "chip active" : "chip"} onClick={() => changeWin([0, hz.length - 1])}>
+                All
+              </button>
+            </div>
+          </div>
           <p>
             <button className="primary" onClick={() => void run()} disabled={!!busy || squad.ids.length !== 15}>
               Build best team
@@ -237,11 +299,17 @@ export default function Planner({ players, gws, nextEvent }: Props) {
             </table>
           </div>
           <p className="muted small">
-            Expected points are summed over GW{hz[0]}–{hz[hz.length - 1]} (gameweeks already under way cannot be changed) with the best XI chosen in each
-            gameweek and the captain counted twice. Out→In pairs are listed by position. Transfers are made
-            now and kept for the whole horizon; chips and future transfers are not modelled.
+            Expected points are for {wgws.length === 1 ? `GW${wgws[0]}` : `GW${wgws[0]}–${wgws[wgws.length - 1]}`}{" "}
+            (gameweeks already under way cannot be changed), with the best XI chosen in each gameweek and the
+            captain counted twice. Out→In pairs are listed by position. Transfers are made now and kept for the
+            whole window; chips and later transfers are not modelled.
           </p>
-          {shown && <LineupView scenario={shown} byId={byId} gws={hz} from={from} />}
+          {shown && (
+            <>
+              <WeekTable base={base} scenario={shown} gws={wgws} />
+              <LineupView scenario={shown} byId={byId} gws={wgws} from={from + win[0]} />
+            </>
+          )}
         </>
       )}
     </section>
@@ -313,7 +381,61 @@ function ProxySetting() {
   );
 }
 
-function SquadTable({ ids, byId, sell, from }: { ids: number[]; byId: Map<number, Player>; sell: Map<number, number>; from: number }) {
+function WeekTable({ base, scenario, gws }: { base: Scenario; scenario: Scenario; gws: number[] }) {
+  const diff = (g: number) => scenario.perGw[g] - base.perGw[g];
+  const fmt = (x: number) => `${x >= 0 ? "+" : ""}${x.toFixed(1)}`;
+  return (
+    <>
+      <h3>By gameweek</h3>
+      <div className="table-wrap">
+        <table className="detail">
+          <thead>
+            <tr>
+              <th className="left">Squad</th>
+              {gws.map((g) => (
+                <th key={g}>GW{g}</th>
+              ))}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="left">Current (no transfers)</td>
+              {base.perGw.map((x, i) => (
+                <td key={i}>{x.toFixed(1)}</td>
+              ))}
+              <td>
+                <b>{base.ep.toFixed(1)}</b>
+              </td>
+            </tr>
+            <tr>
+              <td className="left">
+                With {scenario.k} transfer{scenario.k === 1 ? "" : "s"}
+              </td>
+              {scenario.perGw.map((x, i) => (
+                <td key={i}>{x.toFixed(1)}</td>
+              ))}
+              <td>
+                <b>{scenario.ep.toFixed(1)}</b>
+              </td>
+            </tr>
+            <tr>
+              <td className="left muted">Difference</td>
+              {scenario.perGw.map((_, i) => (
+                <td key={i} className={diff(i) > 0.05 ? "pos-gain" : diff(i) < -0.05 ? "neg-gain" : ""}>
+                  {fmt(diff(i))}
+                </td>
+              ))}
+              <td className={scenario.ep - base.ep > 0.05 ? "pos-gain" : ""}>{fmt(scenario.ep - base.ep)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function SquadTable({ ids, byId, sell, from, to, labels }: { ids: number[]; byId: Map<number, Player>; sell: Map<number, number>; from: number; to: number; labels: number[] }) {
   const rows = [...ids]
     .map((id) => byId.get(id)!)
     .sort((a, b) => POS_ORDER.indexOf(a.pos) - POS_ORDER.indexOf(b.pos) || b.total - a.total);
@@ -325,7 +447,7 @@ function SquadTable({ ids, byId, sell, from }: { ids: number[]; byId: Map<number
             <th className="left">Player</th>
             <th>Sell</th>
             <th>Now</th>
-            {rows[0] && rows[0].gw.slice(from).map((_, i) => <th key={i}>+{i + 1}</th>)}
+            {rows[0] && rows[0].gw.slice(from, to).map((_, i) => <th key={i}>GW{labels[i]}</th>)}
             <th>Total</th>
           </tr>
         </thead>
@@ -338,11 +460,11 @@ function SquadTable({ ids, byId, sell, from }: { ids: number[]; byId: Map<number
               </td>
               <td>{sell.has(p.id) ? money(sell.get(p.id)!) : "–"}</td>
               <td>£{p.cost.toFixed(1)}m</td>
-              {p.gw.slice(from).map((x, i) => (
+              {p.gw.slice(from, to).map((x, i) => (
                 <td key={i}>{x.toFixed(1)}</td>
               ))}
               <td>
-                <b>{p.gw.slice(from).reduce((a, b) => a + b, 0).toFixed(1)}</b>
+                <b>{p.gw.slice(from, to).reduce((a, b) => a + b, 0).toFixed(1)}</b>
               </td>
             </tr>
           ))}

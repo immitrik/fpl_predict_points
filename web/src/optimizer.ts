@@ -24,6 +24,7 @@ export interface Scenario {
   hit: number; // points deducted for extra transfers
   ep: number; // expected points over the horizon, before the hit
   net: number; // ep - hit
+  perGw: number[]; // expected points of the best XI (captain doubled) in each gameweek of the horizon
   out: number[];
   in: number[];
   squad: number[];
@@ -149,11 +150,14 @@ export function solveScenario(
   const squad = pool.filter((p) => on(`x${p.id}`)).map((p) => p.id);
   if (squad.length !== 15) return null;
   const lineups: Lineup[] = [];
+  const perGw: number[] = [];
   let ep = 0;
   for (let g = 0; g < horizon; g++) {
     const xi = pool.filter((p) => on(`y${p.id}_${g}`));
     const cap = pool.find((p) => on(`c${p.id}_${g}`));
-    ep += xi.reduce((s, p) => s + p.gw[g], 0) + (cap ? cap.gw[g] : 0);
+    const gwPts = xi.reduce((s, p) => s + p.gw[g], 0) + (cap ? cap.gw[g] : 0);
+    perGw.push(gwPts);
+    ep += gwPts;
     lineups.push({ gw: g, xi: xi.map((p) => p.id), captain: cap?.id ?? xi[0].id });
   }
   const priceOf = new Map(pool.map((p) => [p.id, p.buy]));
@@ -168,6 +172,7 @@ export function solveScenario(
     hit,
     ep,
     net: ep - hit,
+    perGw,
     out: squadIds.filter((id) => !squad.includes(id)).sort(byPos),
     in: squad.filter((id) => !old.has(id)).sort(byPos),
     squad,

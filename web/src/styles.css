@@ -153,3 +153,6 @@ td.wrap { white-space: normal; }
 .paste summary { cursor: pointer; color: var(--accent); }
 .paste textarea { display: block; width: 100%; min-height: 70px; margin: 6px 0; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 8px; font: 12px/1.3 ui-monospace, monospace; }
 code { background: var(--border); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+
+.auto { color: var(--good); font-weight: 600; }
+.winpick { margin: 12px 0 4px; }

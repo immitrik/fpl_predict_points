@@ -44,7 +44,7 @@ the FPL half-profit rule). The FPL API sends no CORS headers, so loading by ID f
   workflow). The worker only serves FPL API URLs to the origins listed in `worker/fpl-proxy.js`, or
 - visitors can paste the JSON copied from the FPL site, or enter the squad manually (no proxy needed).
 
-Dev tools: `node web/scripts/dev-proxy.mjs` (local proxy), `node web/scripts/plan-check.ts <teamId>` (CLI check).
+Dev tools: `node web/scripts/dev-proxy.mjs` (local proxy), `node web/scripts/plan-check.ts <teamId> [free] [from-to]` (CLI check), `node web/scripts/ft-check.ts <fromId> <toId>` (validates the free-transfer simulation against real hits).
 
 ## Data sources
 
