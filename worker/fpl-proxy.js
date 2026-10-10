@@ -1,6 +1,7 @@
 // Minimal CORS proxy for the official FPL API, for a free Cloudflare Worker.
 // Only FPL API URLs are proxied, and only for browsers on the allowed origins below.
-// Deploy:  cd worker && npx wrangler login && npx wrangler deploy
+// Deploy: either `cd worker && npx wrangler login && npx wrangler deploy`, or connect the repo to a Cloudflare Worker
+// with Build settings -> Root directory = worker (the Worker name must match `name` in wrangler.toml).
 // Then set the repository variable FPL_PROXY (Settings -> Secrets and variables -> Actions -> Variables) to
 //   https://fpl-proxy.<your-subdomain>.workers.dev/?u={url}
 // and re-run the "Update predictions and deploy" workflow.
