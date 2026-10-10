@@ -6,7 +6,7 @@ from .odds import load_odds
 from .baseline import events_to_points, expected_events, position_priors
 from .config import PROCESSED_DIR
 from .features import FeatureBuilder
-from .ml import MAX_H, EventModels
+from .ml import MAX_H, make_models
 from .scoring import actual_points, load_scoring
 
 HORIZON = 5
@@ -114,7 +114,8 @@ def _blend(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return out
 
 
-ALGOS = {"lgbm": ["lgbm"], "rf": ["rf"], "ens": ["lgbm", "rf"], "baseline": []}
+ALGOS = {"lgbm": ["lgbm"], "rf": ["rf"], "ens": ["lgbm", "rf"],
+         "lgbm-pos": ["lgbm-pos"], "rf-pos": ["rf-pos"], "ens-pos": ["lgbm-pos", "rf-pos"], "baseline": []}
 
 
 def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
@@ -127,7 +128,7 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
     priors = position_priors(fb.at(1))
 
     train = train_frame(fb) if ALGOS[algo] else None
-    models = [EventModels(a).fit(train) for a in ALGOS[algo]]
+    models = [make_models(a).fit(train) for a in ALGOS[algo]]
     extra = ["season", "fixture", "code", "element", "gw_index", "status", "now_cost",
              "chance_of_playing_next_round", "selected_by_percent", "news"]
     parts = []
@@ -149,7 +150,7 @@ def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
     fb = FeatureBuilder(played, load_odds(sorted(played["season"].unique())[-1]))
     priors = position_priors(fb.at(1))
     train = train_frame(fb, before=test_season, include_new=include_new)
-    models = {a: EventModels(a).fit(train) for a in algos}
+    models = {a: make_models(a).fit(train) for a in algos}
     results = {}
     for h in horizons:
         f = fb.at(h)

@@ -8,6 +8,10 @@ from .config import HISTORY_SEASONS, PROCESSED_DIR
 from .current import load_current
 from .fpl_api import FplApi
 from .history import load_season
+from .pipeline import ALGOS
+
+MODEL_LABELS = {"ens": "LightGBM + Random Forest", "lgbm": "LightGBM", "rf": "Random Forest",
+                "ens-pos": "LightGBM + Random Forest (per-position)", "baseline": "Baseline"}
 
 PLAYER_COLS = ["id", "code", "web_name", "team", "element_type", "now_cost", "status",
                "chance_of_playing_next_round", "news", "selected_by_percent", "removed"]
@@ -56,8 +60,7 @@ def cmd_export(args: argparse.Namespace) -> None:
 
     pred = predict(algo=args.algo)
     out = Path(args.out)
-    write(pred, load_played(), out, {"ens": "LightGBM + Random Forest", "lgbm": "LightGBM",
-                                     "rf": "Random Forest", "baseline": "Baseline"}[args.algo])
+    write(pred, load_played(), out, MODEL_LABELS.get(args.algo, args.algo))
     print("wrote", out)
 
 
@@ -78,15 +81,15 @@ def main() -> None:
     f.set_defaults(func=cmd_fetch)
     pr = sub.add_parser("predict", help="expected points for the next 5 gameweeks")
     pr.add_argument("--top", type=int, default=20)
-    pr.add_argument("--algo", choices=["lgbm", "rf", "ens", "baseline"], default="ens")
+    pr.add_argument("--algo", choices=list(ALGOS), default="ens")
     pr.set_defaults(func=cmd_predict)
     e = sub.add_parser("export", help="predict and write JSON for the web app")
     e.add_argument("--out", default="../web/public/data")
-    e.add_argument("--algo", choices=["lgbm", "rf", "ens", "baseline"], default="ens")
+    e.add_argument("--algo", choices=list(ALGOS), default="ens")
     e.set_defaults(func=cmd_export)
     b = sub.add_parser("backtest", help="evaluate the baseline on past rows")
     b.add_argument("--seasons", nargs="+", default=["2025-26"])
-    b.add_argument("--algos", nargs="+", choices=["lgbm", "rf"], default=["lgbm", "rf"])
+    b.add_argument("--algos", nargs="+", choices=["lgbm", "rf", "lgbm-pos", "rf-pos"], default=["lgbm", "rf"])
     b.set_defaults(func=cmd_backtest)
     args = p.parse_args()
     args.func(args)

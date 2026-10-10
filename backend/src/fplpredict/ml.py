@@ -53,10 +53,16 @@ class Learner:
             raise ValueError(algo)
 
     def fit(self, x: pd.DataFrame, y: pd.Series) -> "Learner":
+        self.const = None
+        if y.nunique() < 2:  # e.g. goalkeepers never score: nothing to learn, predict the constant
+            self.const = float(y.iloc[0]) if len(y) else 0.0
+            return self
         self.model.fit(x.fillna(-1) if self.algo == "rf" else x, y)
         return self
 
     def predict(self, x: pd.DataFrame) -> np.ndarray:
+        if self.const is not None:
+            return np.full(len(x), self.const)
         x = x.fillna(-1) if self.algo == "rf" else x
         if self.kind == "clf":
             return self.model.predict_proba(x)[:, 1]
@@ -82,10 +88,11 @@ class EventModels:
         for stat in COUNT_STATS:
             self.m[stat] = Learner(a, "reg", "poisson").fit(x_pl, tp[stat])
         gk = (tp["position"] == "GKP").to_numpy()
-        self.m["saves"] = Learner(a, "reg", "poisson").fit(x_pl[gk], tp.loc[gk, "saves"])
+        if gk.any():
+            self.m["saves"] = Learner(a, "reg", "poisson").fit(x_pl[gk], tp.loc[gk, "saves"])
 
         dc = tp["dc_ind"].notna().to_numpy()
-        if dc.sum() >= MIN_DC_ROWS:
+        if dc.sum() >= MIN_DC_ROWS and tp.loc[dc, "dc_ind"].nunique() > 1:
             self.m["dc"] = Learner(a, "clf").fit(x_pl[dc], tp.loc[dc, "dc_ind"])
 
         teams = train.drop_duplicates(["season", "fixture", "team", "h"])
@@ -106,7 +113,7 @@ class EventModels:
             out[col] = p_play * av * np.clip(self.m[stat].predict(x), 0, None)
         gk = (out["position"] == "GKP").to_numpy()
         sv = np.zeros(len(out))
-        if gk.any():
+        if gk.any() and "saves" in self.m:
             sv[gk] = p_play[gk] * av[gk] * np.clip(self.m["saves"].predict(x[gk]), 0, None)
         out["x_saves"] = sv
         if "dc" in self.m:
@@ -114,3 +121,27 @@ class EventModels:
             out["x_dc"] = np.where(out["position"] == "GKP", 0.0, p_play * av * pdc)
         out["p_cs_team"] = np.clip(self.m["cs"].predict(design(out, TEAM_FEATURES)), 0.005, 0.95)
         return out
+
+
+class PositionModels:
+    """One EventModels per position: each learns its own relationships (keepers vs strikers...)."""
+
+    def __init__(self, algo: str = "lgbm") -> None:
+        self.algo = algo
+        self.by_pos: dict[str, EventModels] = {}
+
+    def fit(self, train: pd.DataFrame) -> "PositionModels":
+        for pos in POS_CODE:
+            self.by_pos[pos] = EventModels(self.algo).fit(train[train["position"] == pos])
+        return self
+
+    def apply(self, ev: pd.DataFrame) -> pd.DataFrame:
+        parts = [self.by_pos[pos].apply(ev[ev["position"] == pos]) for pos in POS_CODE
+                 if (ev["position"] == pos).any()]
+        return pd.concat(parts).loc[ev.index]
+
+
+def make_models(spec: str):
+    """`lgbm` / `rf` = one global model; `lgbm-pos` / `rf-pos` = one model per position."""
+    algo, _, suffix = spec.partition("-")
+    return PositionModels(algo) if suffix == "pos" else EventModels(algo)
