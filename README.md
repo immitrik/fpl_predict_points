@@ -39,8 +39,9 @@ The **Planner** tab takes an FPL team ID and finds the best squad for the next g
 (integer programme solved in the browser with HiGHS; −4 per transfer beyond the free ones; selling prices use
 the FPL half-profit rule). The FPL API sends no CORS headers, so loading by ID from a static site needs a proxy:
 
-- deploy `worker/fpl-proxy.js` as a free Cloudflare Worker and set the repository variable `FPL_PROXY` to
-  `https://<worker>.workers.dev/?u={url}` (then re-run the workflow), or
+- deploy the free Cloudflare Worker (`cd worker && npx wrangler login && npx wrangler deploy`) and set the
+  repository variable `FPL_PROXY` to `https://fpl-proxy.<subdomain>.workers.dev/?u={url}` (then re-run the
+  workflow). The worker only serves FPL API URLs to the origins listed in `worker/fpl-proxy.js`, or
 - visitors can paste the JSON copied from the FPL site, or enter the squad manually (no proxy needed).
 
 Dev tools: `node web/scripts/dev-proxy.mjs` (local proxy), `node web/scripts/plan-check.ts <teamId>` (CLI check).
