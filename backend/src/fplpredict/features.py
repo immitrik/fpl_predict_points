@@ -34,7 +34,8 @@ def prepare(frame: pd.DataFrame) -> pd.DataFrame:
     f["played"] = (mins > 0).astype(float).where(mins.notna())
     f["p60"] = (mins >= 60).astype(float).where(mins.notna())
     # ownership percentile among all players in the same gameweek ("wisdom of the crowd")
-    f["sel_rank"] = f.groupby(["season", "round"])["selected"].rank(pct=True)
+    # (played rows and not-yet-played rows are ranked separately: their `selected` scales differ)
+    f["sel_rank"] = f.groupby(["season", "round", f["minutes"].isna()])["selected"].rank(pct=True)
     thr = f["position"].map(DC_THRESHOLD).astype(float)
     f["dc_ind"] = (f["defensive_contribution"] >= thr).astype(float).where(
         f["defensive_contribution"].notna())
@@ -53,6 +54,7 @@ class FeatureBuilder:
             prefix: fc.groupby("code")[cols].ewm(halflife=hl).mean().reset_index(level=0, drop=True)
             for prefix, (hl, cols) in EWM_SETS.items()
         }
+        self.sel_own = fc["sel_rank"]
         self.count_n = fc["minutes"].notna().groupby(self.codes).cumsum()
         self.count_dc = fc["dc_ind"].notna().groupby(self.codes).cumsum()
         self._init_teams()
@@ -141,5 +143,8 @@ class FeatureBuilder:
         f = pd.concat(parts, axis=1)
         f["n"] = self.count_n.groupby(self.codes).shift(h).fillna(0).reindex(f.index)
         f["n_dc"] = self.count_dc.groupby(self.codes).shift(h).fillna(0).reindex(f.index)
+        # ownership as known when forecasting: at h=1 the match's own deadline value; further ahead
+        # we only know the value h-1 matches earlier (for upcoming rows: today's ownership)
+        f["sel_rank"] = self.sel_own.groupby(self.codes).shift(h - 1).reindex(f.index)
         f["h"] = h
         return f

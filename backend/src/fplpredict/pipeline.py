@@ -37,6 +37,7 @@ def upcoming_rows(season: str, horizon: int = HORIZON) -> pd.DataFrame:
     rows = sides.merge(pl, on="team_id")
     rows["season"] = season
     rows["value"] = rows["now_cost"]
+    rows["selected"] = rows["selected_by_percent"].astype(float)  # current ownership (cold-start signal)
     rows["kickoff_time"] = pd.to_datetime(rows["kickoff_time"], utc=True)
     rows["gw_index"] = rows["round"].map({e: i for i, e in enumerate(events)})
     rows = rows.sort_values(["kickoff_time", "fixture"])
@@ -82,12 +83,22 @@ def use_odds(f: pd.DataFrame, weight: float = 0.7) -> pd.DataFrame:
     return f
 
 
-def train_frame(fb: FeatureBuilder, before: str | None = None) -> pd.DataFrame:
-    """Stacked horizon-h feature frames of played rows (with history) for model training."""
+def eligible(f: pd.DataFrame, first_season: str) -> pd.Series:
+    """Rows with history, plus genuinely new players (no earlier matches in a later season).
+
+    Rows without history in the very first season are excluded: those are established players
+    whose past simply is not in our data, not newcomers.
+    """
+    return (f["n"] > 0) | (f["season"] > first_season)
+
+
+def train_frame(fb: FeatureBuilder, before: str | None = None, include_new: bool = True) -> pd.DataFrame:
+    """Stacked horizon-h feature frames of played rows for model training."""
+    first = fb.base["season"].min()
     parts = []
     for h in range(1, MAX_H + 1):
         f = use_odds(visible_odds(fb.at(h), h))
-        m = f["minutes"].notna() & (f["n"] > 0)
+        m = f["minutes"].notna() & (eligible(f, first) if include_new else f["n"] > 0)
         if before is not None:
             m &= f["season"] < before
         parts.append(f[m])
@@ -131,13 +142,13 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
 
 
 def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
-             horizons: tuple[int, ...] = (1, 3, 5)) -> dict[int, pd.DataFrame]:
+             horizons: tuple[int, ...] = (1, 3, 5), include_new: bool = True) -> dict[int, pd.DataFrame]:
     """Train on seasons before `test_season`; compare baseline and ML on every row of it."""
     sc = load_scoring()
     played = load_played()
     fb = FeatureBuilder(played, load_odds(sorted(played["season"].unique())[-1]))
     priors = position_priors(fb.at(1))
-    train = train_frame(fb, before=test_season)
+    train = train_frame(fb, before=test_season, include_new=include_new)
     models = {a: EventModels(a).fit(train) for a in algos}
     results = {}
     for h in horizons:
@@ -145,7 +156,7 @@ def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
         if h > 1:
             f = visible_odds(f, h)  # distant fixtures have no published odds yet
         f = use_odds(f)
-        f = f[(f["season"] == test_season) & (f["n"] > 0)]
+        f = f[(f["season"] == test_season) & eligible(f, fb.base["season"].min())]
         ev = expected_events(f, priors)
         base = events_to_points(ev, sc)
         res = base[["season", "round", "code", "name", "position", "ew_minutes"]].copy()
@@ -157,6 +168,7 @@ def backtest(test_season: str, algos: tuple[str, ...] = ("lgbm", "rf"),
         if len(outs) > 1:
             res["ens"] = _blend(list(outs.values()))["xpts"]
         res["fpl_xp"] = f["fpl_xp"]
+        res["n"] = f["n"]
         results[h] = res
     return results
 
@@ -165,11 +177,13 @@ def summarize(results: dict[int, pd.DataFrame]) -> pd.DataFrame:
     rows = {}
     for h, res in results.items():
         models = [c for c in res.columns if c not in
-                  ("season", "round", "code", "name", "position", "ew_minutes", "actual", "fpl_xp")]
+                  ("season", "round", "code", "name", "position", "ew_minutes", "actual", "fpl_xp", "n")]
         if h == 1 and res["fpl_xp"].notna().any():
             res = res[res["fpl_xp"].notna()]  # same rows for every model incl. FPL's own xP
             models.append("fpl_xp")
-        for label, g in (("all", res), ("regulars", res[res["ew_minutes"] >= 45])):
+        groups = [("all", res), ("regulars", res[res["ew_minutes"] >= 45]),
+                  ("new (n=0)", res[res["n"] == 0]), ("n>0", res[res["n"] > 0])]
+        for label, g in groups:
             row = {"rows": len(g)}
             for m in models:
                 err = g[m] - g["actual"]

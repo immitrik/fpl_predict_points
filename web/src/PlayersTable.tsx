@@ -17,7 +17,9 @@ export default function PlayersTable({ players, gws, onSelect }: Props) {
   const [pos, setPos] = useState<"ALL" | Pos>("ALL");
   const [team, setTeam] = useState("ALL");
   const [query, setQuery] = useState("");
-  const [maxCost, setMaxCost] = useState(15);
+  const costCap = useMemo(() => Math.ceil(Math.max(...players.map((p) => p.cost)) * 2) / 2, [players]);
+  const [maxCostPick, setMaxCost] = useState<number | null>(null);
+  const maxCost = maxCostPick ?? costCap;
   const [hideOut, setHideOut] = useState(true);
   const [sort, setSort] = useState<SortKey>("total");
   const [desc, setDesc] = useState(true);
@@ -94,7 +96,7 @@ export default function PlayersTable({ players, gws, onSelect }: Props) {
           <input
             type="range"
             min={4}
-            max={15}
+            max={costCap}
             step={0.5}
             value={maxCost}
             onChange={(e) => {

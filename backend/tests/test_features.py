@@ -43,3 +43,13 @@ def test_horizon_shifts_state_back():
     # an upcoming 3rd match sees the same state as the 1st upcoming one
     up = FeatureBuilder(_frame([90, 60, 30, np.nan, np.nan, np.nan]))
     assert up.at(3)["ew_minutes"].iloc[5] == up.at(1)["ew_minutes"].iloc[3]
+
+
+def test_cold_start_eligibility():
+    import pandas as pd
+    from fplpredict.pipeline import eligible
+
+    f = pd.DataFrame({"season": ["2022-23", "2022-23", "2023-24", "2023-24"], "n": [0, 3, 0, 5]})
+    # first-season rows without history are established players with unseen pasts -> excluded;
+    # a later-season player with n=0 is a genuine newcomer -> included
+    assert eligible(f, "2022-23").tolist() == [False, True, True, True]
