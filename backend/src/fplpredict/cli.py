@@ -48,6 +48,19 @@ def cmd_predict(args: argparse.Namespace) -> None:
     print(total.head(args.top).to_string(index=False, float_format="%.1f"))
 
 
+def cmd_export(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from .export import write
+    from .pipeline import load_played, predict
+
+    pred = predict(algo=args.algo)
+    out = Path(args.out)
+    write(pred, load_played(), out, {"ens": "LightGBM + Random Forest", "lgbm": "LightGBM",
+                                     "rf": "Random Forest", "baseline": "Baseline"}[args.algo])
+    print("wrote", out)
+
+
 def cmd_backtest(args: argparse.Namespace) -> None:
     from .pipeline import backtest, summarize
 
@@ -67,6 +80,10 @@ def main() -> None:
     pr.add_argument("--top", type=int, default=20)
     pr.add_argument("--algo", choices=["lgbm", "rf", "ens", "baseline"], default="ens")
     pr.set_defaults(func=cmd_predict)
+    e = sub.add_parser("export", help="predict and write JSON for the web app")
+    e.add_argument("--out", default="../web/public/data")
+    e.add_argument("--algo", choices=["lgbm", "rf", "ens", "baseline"], default="ens")
+    e.set_defaults(func=cmd_export)
     b = sub.add_parser("backtest", help="evaluate the baseline on past rows")
     b.add_argument("--seasons", nargs="+", default=["2025-26"])
     b.add_argument("--algos", nargs="+", choices=["lgbm", "rf"], default=["lgbm", "rf"])

@@ -117,7 +117,7 @@ def predict(horizon: int = HORIZON, algo: str = "ens") -> pd.DataFrame:
 
     train = train_frame(fb) if ALGOS[algo] else None
     models = [EventModels(a).fit(train) for a in ALGOS[algo]]
-    extra = ["season", "fixture", "code", "element", "gw_index", "status",
+    extra = ["season", "fixture", "code", "element", "gw_index", "status", "now_cost",
              "chance_of_playing_next_round", "selected_by_percent", "news"]
     parts = []
     for h in sorted(up["h"].unique()):

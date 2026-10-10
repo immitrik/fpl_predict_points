@@ -21,3 +21,14 @@ python -m venv .venv
 .venv/Scripts/python -m fplpredict.cli backtest --seasons 2025-26 2026-27   # baseline vs LightGBM vs RF vs ensemble
 .venv/Scripts/python -m pytest
 ```
+
+## Website
+
+```
+cd backend && .venv/Scripts/python -m fplpredict.cli export   # writes web/public/data/*.json
+cd ../web && npm install && npm run dev                       # http://localhost:5173
+```
+
+Deployment is automatic: `.github/workflows/deploy.yml` fetches data, trains the models, exports
+the JSON, builds the site and publishes it to GitHub Pages on every push to `main` and every 6 hours.
+One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**.
