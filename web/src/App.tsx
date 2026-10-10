@@ -3,11 +3,13 @@ import type { PlayersFile, TeamsFile } from "./types";
 import PlayersTable from "./PlayersTable";
 import PlayerModal from "./PlayerModal";
 import FixtureTicker from "./FixtureTicker";
+import Planner from "./Planner";
 
-type Tab = "players" | "fixtures" | "about";
+type Tab = "players" | "fixtures" | "planner" | "about";
 const TABS: { id: Tab; label: string }[] = [
   { id: "players", label: "Players" },
   { id: "fixtures", label: "Fixtures" },
+  { id: "planner", label: "Planner" },
   { id: "about", label: "About" },
 ];
 
@@ -84,6 +86,7 @@ export default function App() {
             <PlayersTable players={players.players} gws={players.gws} onSelect={setSelected} />
           )}
           {tab === "fixtures" && <FixtureTicker teams={teams.teams} gws={teams.gws} />}
+          {tab === "planner" && <Planner players={players.players} gws={players.gws} nextEvent={players.next_event} />}
           {tab === "about" && <About model={players.model} />}
         </main>
       )}

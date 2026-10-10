@@ -48,6 +48,7 @@ def build(pred: pd.DataFrame, played: pd.DataFrame, model: str) -> tuple[dict, d
             "team": short.get(first["team"], first["team"]),
             "pos": first["position"],
             "cost": _r(first["now_cost"] / 10, 1),
+            "start": _r((first["now_cost"] - first["cost_change_start"]) / 10, 1),
             "own": _r(float(first["selected_by_percent"]), 1),
             "status": first["status"],
             "chance": None if pd.isna(chance) else int(chance),
@@ -79,10 +80,13 @@ def build(pred: pd.DataFrame, played: pd.DataFrame, model: str) -> tuple[dict, d
         })
     team_rows.sort(key=lambda t: t["team"])
 
+    events = pd.read_parquet(PROCESSED_DIR / "current_events.parquet")
+    nxt = events.loc[events["is_next"].astype(bool), "id"]
     meta = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "season": season,
         "gws": gws,
+        "next_event": int(nxt.iloc[0]) if len(nxt) else gws[0],  # first gameweek whose deadline is still ahead
         "model": model,
     }
     return {**meta, "players": players}, {**meta, "teams": team_rows}

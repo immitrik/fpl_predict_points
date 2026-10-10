@@ -15,7 +15,8 @@ MODEL_LABELS = {"ens": "LightGBM + Random Forest", "lgbm": "LightGBM", "rf": "Ra
 
 PLAYER_COLS = ["id", "code", "web_name", "team", "element_type", "now_cost", "status",
                "chance_of_playing_next_round", "news", "news_added", "selected_by_percent", "removed",
-               "penalties_order", "corners_and_indirect_freekicks_order", "direct_freekicks_order"]
+               "penalties_order", "corners_and_indirect_freekicks_order", "direct_freekicks_order",
+               "cost_change_start"]
 FIXTURE_COLS = ["id", "event", "team_h", "team_a", "kickoff_time", "started", "finished"]
 
 

@@ -52,6 +52,8 @@ jobs:
 
       - name: Build site
         working-directory: web
+        env:
+          VITE_FPL_PROXY: ${{ vars.FPL_PROXY }}   # optional CORS proxy for loading a team by ID
         run: |
           npm ci
           npm run build

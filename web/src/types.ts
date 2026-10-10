@@ -29,6 +29,7 @@ export interface Player {
   team: string;
   pos: Pos;
   cost: number;
+  start: number; // price at the start of the season
   own: number;
   status: string;
   chance: number | null;
@@ -47,6 +48,7 @@ export interface Meta {
   generated_at: string;
   season: string;
   gws: number[];
+  next_event: number; // first gameweek whose deadline has not passed (transfers apply from here)
   model: string;
 }
 

@@ -33,6 +33,18 @@ Deployment is automatic: `.github/workflows/deploy.yml` fetches data, trains the
 the JSON, builds the site and publishes it to GitHub Pages on every push to `main` and every 6 hours.
 One-time setup: repository **Settings -> Pages -> Source: GitHub Actions**.
 
+### Transfer planner
+
+The **Planner** tab takes an FPL team ID and finds the best squad for the next gameweeks with 0-4 transfers
+(integer programme solved in the browser with HiGHS; −4 per transfer beyond the free ones; selling prices use
+the FPL half-profit rule). The FPL API sends no CORS headers, so loading by ID from a static site needs a proxy:
+
+- deploy `worker/fpl-proxy.js` as a free Cloudflare Worker and set the repository variable `FPL_PROXY` to
+  `https://<worker>.workers.dev/?u={url}` (then re-run the workflow), or
+- visitors can paste the JSON copied from the FPL site, or enter the squad manually (no proxy needed).
+
+Dev tools: `node web/scripts/dev-proxy.mjs` (local proxy), `node web/scripts/plan-check.ts <teamId>` (CLI check).
+
 ## Data sources
 
 Used: official FPL API; [vaastav/Fantasy-Premier-League](https://github.com/vaastav/Fantasy-Premier-League)
